@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Recommendation System</title>
+    <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📚 Book Recommendation System</h1>
+            <p class="subtitle">Discover your next favorite book</p>
+        </header>
+
+        <main>
+            <section class="search-section">
+                <div class="search-box">
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        placeholder="Enter a book title..."
+                        autocomplete="off"
+                    >
+                    <button id="searchBtn" onclick="searchBooks()">Search</button>
+                </div>
+                
+                <div class="options">
+                    <label>
+                        Number of recommendations:
+                        <select id="numRecommendations">
+                            <option value="5" selected>5</option>
+                            <option value="10">10</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div id="searchResults" class="search-results"></div>
+            </section>
+
+            <section id="recommendationsSection" class="recommendations-section hidden">
+                <h2>Recommendations based on: <span id="sourceBookTitle"></span></h2>
+                <div id="sourceBookInfo" class="source-book"></div>
+                <div id="recommendations" class="recommendations-grid"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Book Recommendation System </p>
+        </footer>
+    </div>
+
+    <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080';
+
+        // Event listeners
+        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchBooks();
+            }
+        });
+
+        // Search for books
+        async function searchBooks() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) {
+                alert('Please enter a book title');
+                return;
+            }
+
+            showLoading();
+            try {
+                const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}&limit=10`);
+                const data = await response.json();
+                displaySearchResults(data.books);
+            } catch (error) {
+                console.error('Search error:', error);
+                alert('Error searching for books. Make sure the server is running.');
+            }
+            hideLoading();
+        }
+
+        // Display search results
+        function displaySearchResults(books) {
+            const container = document.getElementById('searchResults');
+            
+            if (!books || books.length === 0) {
+                container.innerHTML = '<p class="no-results">No books found. Try a different search term.</p>';
+                return;
+            }
+
+            container.innerHTML = `
+                <h3>Search Results (click to get recommendations)</h3>
+                <div class="search-results-list">
+                    ${books.map(book => `
+                        <div class="search-result-item" onclick="getRecommendations('${escapeHtml(book.title)}')">
+                            <div class="book-title">${escapeHtml(book.title)}</div>
+                            <div class="book-meta">
+                                <span class="author">by ${escapeHtml(book.author || 'Unknown')}</span>
+                                <span class="genre">${escapeHtml(truncateGenre(book.genre))}</span>
+                                <span class="rating">⭐ ${book.rating?.toFixed(1) || 'N/A'}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Truncate genre for display
+        function truncateGenre(genre) {
+            if (!genre) return '';
+            const genres = genre.split(',').slice(0, 2).map(g => g.trim());
+            return genres.join(', ');
+        }
+
+        // Get recommendations for a book
+        async function getRecommendations(title) {
+            const k = document.getElementById('numRecommendations').value;
+            
+            showLoading();
+            try {
+                const response = await fetch(`${API_BASE}/api/recommend?title=${encodeURIComponent(title)}&k=${k}`);
+                const data = await response.json();
+                
+                if (data.error && (!data.recommendations || data.recommendations.length === 0)) {
+                    alert(data.error);
+                    hideLoading();
+                    return;
+                }
+
+                displayRecommendations(data);
+            } catch (error) {
+                console.error('Recommendation error:', error);
+                alert('Error getting recommendations. Make sure the server is running.');
+            }
+            hideLoading();
+        }
+
+        // Display recommendations
+        function displayRecommendations(data) {
+            const section = document.getElementById('recommendationsSection');
+            const titleSpan = document.getElementById('sourceBookTitle');
+            const sourceInfo = document.getElementById('sourceBookInfo');
+            const container = document.getElementById('recommendations');
+
+            section.classList.remove('hidden');
+
+            if (data.source_book) {
+                titleSpan.textContent = data.source_book.title;
+                sourceInfo.innerHTML = `
+                    <div class="source-book-card">
+                        <h4>${escapeHtml(data.source_book.title)}</h4>
+                        <p><strong>Author:</strong> ${escapeHtml(data.source_book.author || 'Unknown')}</p>
+                        <p><strong>Genre:</strong> ${escapeHtml(truncateGenre(data.source_book.genre) || 'N/A')}</p>
+                        <p><strong>Rating:</strong> ⭐ ${data.source_book.rating?.toFixed(1) || 'N/A'}</p>
+                    </div>
+                `;
+            }
+
+            if (!data.recommendations || data.recommendations.length === 0) {
+                container.innerHTML = '<p class="no-results">No recommendations found for this book.</p>';
+                return;
+            }
+
+            container.innerHTML = data.recommendations.map((rec, index) => `
+                <div class="recommendation-card">
+                    <div class="rank">#${index + 1}</div>
+                    <div class="book-info">
+                        <h4 class="book-title">${escapeHtml(rec.book.title)}</h4>
+                        <p class="author">by ${escapeHtml(rec.book.author || 'Unknown')}</p>
+                        <p class="genre">${escapeHtml(truncateGenre(rec.book.genre))}</p>
+                        <div class="book-stats">
+                            <span class="rating">⭐ ${rec.book.rating?.toFixed(1) || 'N/A'}</span>
+                            <span class="similarity">Similarity: ${(rec.score * 100).toFixed(1)}%</span>
+                        </div>
+                    </div>
+                    <button class="rec-btn" onclick="getRecommendations('${escapeHtml(rec.book.title)}')">
+                        Get Similar
+                    </button>
+                </div>
+            `).join('');
+
+            // Scroll to recommendations
+            section.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Utility functions
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML.replace(/'/g, "\\'");
+        }
+
+        function showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
